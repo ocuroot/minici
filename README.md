@@ -1,5 +1,7 @@
 # minici
 
+[![GoDoc](https://pkg.go.dev/badge/github.com/ocuroot/minici)](https://pkg.go.dev/github.com/ocuroot/minici)
+
 A tiny, git-integrated CI server that can be started locally to test workflows.
 This is currently used to test Ocuroot end-to-end.
 
