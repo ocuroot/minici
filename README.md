@@ -97,6 +97,7 @@ This will return a JSON object containing the job ID, status, and job configurat
     "commit": "main",
     "command": "go test ./..."
 }
+```
 
 ### Get job logs
 
