@@ -59,7 +59,7 @@ func NewRESTServer(ci minici.CI, address string) *RESTServer {
 			Addr:         address,
 			Handler:      router,
 			ReadTimeout:  15 * time.Second,
-			WriteTimeout: 15 * time.Second,
+			WriteTimeout: 5 * time.Minute,
 			IdleTimeout:  60 * time.Second,
 		},
 	}
@@ -79,6 +79,15 @@ func (s *RESTServer) registerRoutes() {
 			s.handleListJobs(w, r)
 		case http.MethodPost:
 			s.handleScheduleJob(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	s.router.HandleFunc("/api/wait", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.handleWait(w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -191,6 +200,90 @@ func (s *RESTServer) handleJobLogs(w http.ResponseWriter, r *http.Request, jobID
 		ID:   string(jobID),
 		Logs: logs,
 	}, http.StatusOK)
+}
+
+// handleWait blocks until all jobs are complete, returning 200 if all succeeded or 500 if any failed
+// If no jobs are scheduled after 30s, returns 204 No Content.
+// Times out 5 minutes after this request or the start of the first job, whichever is later.
+func (s *RESTServer) handleWait(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	startTime := time.Now()
+
+	fDone := make(chan struct{})
+
+	defer func() {
+		close(fDone)
+	}()
+	go func() {
+		select {
+		case <-fDone:
+			fmt.Println("Function completed first")
+		case <-r.Context().Done():
+			fmt.Println("Context completed first")
+		}
+		fmt.Println("Took", time.Since(startTime))
+	}()
+
+	fmt.Println("REST server: Wait")
+
+	// Wait up to 30s for at least one job to have started
+	start := time.Now()
+	for time.Since(start) < 30*time.Second {
+		jobIDs := s.ci.ListJobs()
+		if len(jobIDs) > 0 {
+			fmt.Printf("We have %d jobs\n", len(jobIDs))
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if len(s.ci.ListJobs()) == 0 {
+		fmt.Println("No jobs scheduled")
+		s.writeJSONNoContentType(w, "no jobs scheduled", http.StatusNoContent)
+		return
+	}
+
+	// Wait up to 5 minutes for all jobs to complete
+	start = time.Now()
+	for {
+		if time.Since(start) > 5*time.Minute {
+			fmt.Println("Timeout waiting for jobs to complete")
+			s.writeJSONNoContentType(w, "timeout waiting for jobs to complete", http.StatusRequestTimeout)
+			return
+		}
+		allDone := true
+		detail := s.ci.AllJobDetail()
+		for _, job := range detail {
+			if job.Status == minici.JobStatusPending || job.Status == minici.JobStatusRunning {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	for _, job := range s.ci.AllJobDetail() {
+		if job.Status != minici.JobStatusSuccess {
+			fmt.Printf("Job %s failed with status %s\n", job.ID, job.Status)
+			s.writeJSONNoContentType(w, "one or more jobs failed", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	fmt.Println("all complete")
+	s.writeJSONNoContentType(w, "all jobs completed successfully", http.StatusOK)
+}
+
+// writeJSON writes a JSON response with the given status code
+func (s *RESTServer) writeJSONNoContentType(w http.ResponseWriter, data interface{}, statusCode int) {
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // writeJSON writes a JSON response with the given status code

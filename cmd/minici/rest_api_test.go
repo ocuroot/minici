@@ -56,6 +56,14 @@ func (m *mockCI) ListJobs() []minici.JobID {
 	return jobIDs
 }
 
+func (m *mockCI) AllJobDetail() []minici.Job {
+	var jobs []minici.Job
+	for _, job := range m.jobs {
+		jobs = append(jobs, *job)
+	}
+	return jobs
+}
+
 func (m *mockCI) JobDetail(jobID minici.JobID) minici.Job {
 	if job, exists := m.jobs[jobID]; exists {
 		return *job
@@ -293,5 +301,33 @@ func TestInvalidRequests(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "nonexistent", response.ID)
 		assert.Equal(t, string(minici.JobStatusFailure), response.Status)
+	})
+}
+
+func TestWait(t *testing.T) {
+	// Create a mock CI implementation
+	ci := newMockCI()
+
+	// Create the REST server with the mock CI
+	restServer := NewRESTServer(ci, ":8080")
+
+	t.Run("Wait for Jobs", func(t *testing.T) {
+		go func() {
+			for i := 0; i < 10; i++ {
+				ci.ScheduleJob("https://github.com/ocuroot/minici", "main", "go test ./...")
+			}
+		}()
+
+		// Create HTTP request
+		req := httptest.NewRequest("GET", "/api/wait", nil)
+
+		// Create response recorder
+		rr := httptest.NewRecorder()
+
+		// Handle request
+		restServer.router.ServeHTTP(rr, req)
+
+		// Check response
+		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 }

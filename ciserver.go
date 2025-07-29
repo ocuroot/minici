@@ -29,6 +29,7 @@ const (
 type CI interface {
 	ScheduleJob(repoURI string, commit string, command string) JobID
 	ListJobs() []JobID
+	AllJobDetail() []Job
 	JobDetail(jobID JobID) Job
 	JobLogs(jobID JobID) []string
 }
@@ -188,6 +189,17 @@ func (s *CIServer) ListJobs() []JobID {
 	}
 
 	return jobIDs
+}
+
+func (s *CIServer) AllJobDetail() []Job {
+	s.jobMutex.RLock()
+	defer s.jobMutex.RUnlock()
+
+	var jobs []Job
+	for _, job := range s.jobs {
+		jobs = append(jobs, *job)
+	}
+	return jobs
 }
 
 func (s *CIServer) JobDetail(jobID JobID) Job {
